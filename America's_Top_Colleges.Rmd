@@ -1,0 +1,1092 @@
+---
+title: "Statistical and Predictive Analyses of (Select) College Data"
+header-includes:
+- \usepackage[default]{sourcesanspro}
+- \usepackage[T1]{fontenc}
+mainfont: Avenir Next
+output:
+  html_document:
+    toc: yes
+    number_sections: yes
+    theme: flatly
+  pdf_document:
+    toc: yes
+---
+
+```{r, echo=FALSE, message = FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(ggplot2)
+library(GGally)
+library(rvest)
+library(httr)
+library(polite)
+library(fastDummies)
+library(ggpubr)
+library(ggthemes)
+library(dplyr)
+library(knitr)
+library(rmarkdown)
+library(tidymodels)
+library(stringr)
+library(rlang)
+library(caret)
+library(melt)
+library(tidyselect)
+library(devtools)
+library(scales) 
+library(viridis)
+library(ggcorrplot)
+library(corrplot)
+library(visdat)
+library(naniar)
+library(hrbrthemes)
+library(forcats)
+library(report)
+library(kableExtra)
+library(car)
+library(visreg)
+library(qtlmt)
+library(mvnormtest)
+library(ggeffects)
+```
+
+```{r, echo=FALSE, message = FALSE, warning=FALSE}
+qual_colleges_all_data <- read_csv('Qual_Colleges_Data.csv')
+qual_colleges_ROI_merged_cleaned <- read_csv('qual_colleges_ROI_merged_cleaned.csv')
+```
+
+```{r, echo=FALSE, results = FALSE, message = FALSE, warning=FALSE}
+qual_colleges_all_data <- qual_colleges_all_data %>% 
+  select(-OPEID, -OPEID6, -CITY, -STABBR, -ZIP, -ACCREDAGENCY, -INSTURL, -PREDDEG, -HIGHDEG, -REGION, -LATITUDE, -LONGITUDE,
+         -DISTANCEONLY, -CURROPER, -COSTT4_P, -C150_4, -RET_PT4, -GRAD_DEBT_MDN_SUPP, -GRAD_DEBT_MDN10YR_SUPP, -C100_4, -ICLEVEL,
+         -OPENADMP, -ACCREDCODE, -BOOKSUPPLY, -ADMCON7, -MDCOMP_ALL, -MDCOST_ALL, -MDEARN_ALL, -PPTUG_EF)
+```
+
+```{r, echo=FALSE, results = FALSE, message = FALSE, warning=FALSE}
+qual_colleges_all_data2 = qual_colleges_all_data %>% mutate(across(c(16:20, 25), .fns=as.double))
+```
+
+```{r, echo=FALSE, results = FALSE, message = FALSE, warning=FALSE}
+qual_colleges_all_data_clean <- qual_colleges_all_data2 %>% drop_na('PFTFAC', 'MD_EARN_WNE_P10', 'PCT25_EARN_WNE_P10', 'PCT75_EARN_WNE_P10', 'MD_EARN_WNE_P6', 'GRAD_DEBT_MDN')
+```
+
+
+```{r, echo=FALSE, message = FALSE}
+write.csv(qual_colleges_all_data_clean, "qual_colleges_all_data_clean.csv")
+```
+
+# Introduction 
+This study began with more than 6,500 colleges, of which 1,121 meet our eligibility criteria. Having identified America's Top 18 colleges, we now shift our attention to the question, What (if any) institutional features predict achievement of "top college" status? Focusing on those 1,121 institutions, we shall use statistical analysis to explore the relationships between two dependent variables---`MD_EARN_WNE_P10` and `X40.year.NPV`---and twelve independent variables. It is assumed that future earnings is a driving concern among those selecting a college to attend, and for that reason special attention is given to dependent variables having to do with future earnings. This assumption is why 6 of the 11 determining criteria for being a "Top College" (part one of this study) had to do with earnings. Let us stipulate that the likelihood of producing graduates with higher future earnings equates to an institution's being a "top college". This section focuses on gaining deeper familiarity with the data, looking for anomalies, and identifying predictors that may help us understand what traits make a top college. 
+
+Here is a summative look at our data:
+
+```{r message=FALSE, warning=FALSE}
+str(qual_colleges_all_data_clean)
+vis_dat(qual_colleges_all_data_clean)
+```
+
+The `GRADS` attribute column contains numerous null values, but that is because not all institutions offer graduate programs and this study does not wish to exclude any institution on those grounds. No other attributes contain null values.
+
+
+```{r}
+head(qual_colleges_all_data_clean)
+```
+
+
+As we see, our data consists of 1,121 observations (one per college) and 25 attributes.
+```{r}
+dim(qual_colleges_all_data_clean)
+```
+
+# Exploring Median Earnings of Students Working and Not Enrolled 10 Years After Entry (`MD_EARN_WNE_P10`)
+
+(1) Let's begin with asking, How is `MD_EARN_WNE_P10` related to institutional admission rates (`ADM_RATE`)?
+
+```{r}
+ggplot(qual_colleges_all_data_clean, aes(x = ADM_RATE, y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1",
+              fill="darkolivegreen2") +
+  labs(title = "Median Earnings After 10 Years By Admission Rates", 
+       element_text(family="Optima")) +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Admissions Rates") +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal()
+```
+
+While this relation is not quite linear, the regression line does indicate that more selective admission rates point to higher median earnings ten years after entry. We also observe that *most* of the colleges in our dataset have admission rates above 50%.
+
+
+(2) How does `MD_EARN_WNE_P10` relate to enrollment of undergraduate certificate/degree-seeking students (`UGDS`)?
+
+```{r}
+ggplot(qual_colleges_all_data_clean, aes(x = UGDS, y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=function(x) format(x, big.mark = ",", 
+                                               scientific = FALSE)) + #add thousands comma
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2") +
+  labs(title = "Median Earnings After 10 Years By Undergrad Enrollment") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Undergrad Enrollment") +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal()
+```
+
+It seems clear that the number of undergraduate certificate/degree-seeking students at an institution has minimal bearing on `MD_EARN_WNE_P10`.
+
+
+(3) How does `MD_EARN_WNE_P10` relate to the average SAT equivalent score of students admitted (`SAT_AVG`)? Because an institution's level of research activity, the presence and type of advanced programs, and mix of undergraduate degree types is tied to the presence of high-performing students, our scatterplot also indicates Carnegie Classification numbers by color.
+
+```{r message=FALSE, warning=FALSE}
+options(scipen=10000)
+p <- ggplot(qual_colleges_all_data_clean, mapping = aes(x = SAT_AVG, y = MD_EARN_WNE_P10), 
+            alpha = 0.4, size = 0.5) +
+geom_point(aes(color = factor(CCBASIC)),  size = 0.85) +  
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=function(x) format(x, big.mark = ",", 
+                                               scientific = FALSE))
+cols <- c("15" = "burlywood4", "16" = "red", "17" = "gray52", "18" = "blue",
+          "19" = "black", "20" = "chocolate1", "21" = "darkmagenta",
+          "22" = "deeppink","23" = "yellow2")
+p + scale_color_manual(values = cols) +
+  guides(color=guide_legend(override.aes = list(size=3.5),
+                            (title="Carnegie Classifications"))) +
+  labs(title = "Median Earnings After 10 Years By Average SAT Scores", 
+       subtitle = "Colored by Carnegie Classification") +
+  xlab(label = "Average SAT Scores") + 
+  scale_colour_hue(h = c(0, 280)) +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2")
+```
+
+Not surprisingly, it does appear that higher average SAT scores indicate higher `MD_EARN_WNE_P10`. The relation, however, is exponential rather than linear. At the same time, it does not appear that an institution's Carnegie Classification has much (if any) impact on its `MD_EARN_WNE_P10`.
+
+
+(4) How does `MD_EARN_WNE_P10` relate to the cost of out-of-state tuition and fees (`TUITIONFEE_OUT`)?
+
+```{r}
+ggplot(qual_colleges_all_data_clean, aes(x = TUITIONFEE_OUT, 
+                                         y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+   scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2") +
+  labs(title = "Median Earnings After 10 Years By Out-of-State Tuition and Fees") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Out-of-State Tuition and Fees") +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal()
+```
+
+While the relation is not quite linear, it does appear that higher rates of out-of-state tuition and fees correlate to higher `MD_EARN_WNE_P10`. Here again, however, the variables' relation is exponential rather than linear.
+
+
+(5) How does `MD_EARN_WNE_P10` relate to average monthly faculty salary (`AVGFACSAL`)?  
+
+```{r}
+ggplot(qual_colleges_all_data_clean, aes(x = AVGFACSAL, y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2") +
+  labs(title = "Median Earnings By Average Monthly Faculty Salary") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Average Monthly Faculty Salary") +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal()
+```
+
+It is reasonable to expect higher paying schools to attract superior faculty and thus to provide superior education, thereby realizing higher `MD_EARN_WNE_P10`. That expectation appears to be confirmed by the scatterplot. 
+
+
+(6) How does `MD_EARN_WNE_P10` relate to the proportion of faculty who are full-time (`PFTFAC`)? To enhance our understanding, the scatterplot displays average monthly faculty salary by color. 
+
+```{r}
+ggplot(qual_colleges_all_data_clean, mapping = aes(x = PFTFAC, 
+                                                   y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point(aes(color = AVGFACSAL),  size = 0.85) +
+  #for legend coloring and units in $$$
+  scale_color_viridis(option="A", label=scales::dollar) + 
+  scale_y_continuous(labels=scales::dollar_format()) +
+  guides(color=guide_legend(override.aes = list(size=3), 
+                            (title="Avg Monthly Faculty Salary"))) +  
+  #to adjust legend unit size & legend title
+  labs(title = "Median Earnings After 10 Years By Proportion of Full-time Faculty", 
+       subtitle = "Colored by Avg Monthly Faculty Salary") +
+  xlab(label = "Proportion of Full-time Faculty") + 
+  #scale_colour_hue(h = c(0, 280)) +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal() + 
+  theme(legend.position = "top") +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2")
+```
+
+As with average faculty salary, it is reasonable to expect a higher proportion of full-time faculty to correlate to higher `MD_EARN_WNE_P10`. This seems to be supported by the observation that higher average monthly faculty salary appears to correlate to higher `MD_EARN_WNE_P10`. The data, however, indicate a non-linear (somewhat polynomial) relation between the proportion of faculty who are full-time and `MD_EARN_WNE_P10`. 
+
+(7) How does `MD_EARN_WNE_P10` relate to the retention rate of first-time, full-time students (`RET_FT4_POOLED`)? To enhance our understanding, the scatterplot displays instructional expenditures per full-time equivalent student by color. 
+
+```{r}
+ggplot(qual_colleges_all_data_clean, mapping = aes(x = RET_FT4_POOLED, 
+                                                   y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point(aes(color = INEXPFTE),  size = 0.85) +
+  #for legend coloring and units in $$$
+  scale_color_viridis(option="A", label=scales::dollar) + 
+  scale_y_continuous(labels=scales::dollar_format()) +
+  guides(color=guide_legend(override.aes = list(size=2),nrow=2,
+                            (title="Instructional Expenditures per FTE"))) +  
+  #to adjust legend unit size & legend title
+  labs(title = "Median Earnings By Retention Rate of First-time, Full-time Students", 
+       subtitle = "Colored by Instructional Expenditures per FTE Student") +
+  xlab(label = "Retention Rate") +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal() +
+  theme(legend.position = "top", legend.title = element_text(size=9,)) +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1",
+              fill="darkolivegreen2")
+```
+
+We observe a strong indication that higher retention rates correlate to higher `MD_EARN_WNE_P10` (note how the points tend to *hug* the line). Most institutions have an `INEXPFTE` around $25,000. Not surprisingly, we also observe that the highest instructional expenditures per FTE student correspond with the highest student retention rates.
+
+
+(8) How does `MD_EARN_WNE_P10` relate to the number of graduate students (`GRADS`)? 
+
+```{r message=FALSE, warning=FALSE}
+ggplot(qual_colleges_all_data_clean, aes(x = GRADS, y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=function(x) format(x, big.mark = ",", 
+                                               scientific = FALSE)) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2") +
+  labs(title = "Median Earnings By Graduate Enrollment") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Graduate Enrollment") +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal()
+```
+
+There is a non-linear (exponential) relation between `MD_EARN_WNE_P10` and the number of graduate students at a school, and the latter appears to have no bearing on the former. Indeed, Liberty University, which has 38,561 graduate students---by far the highest reported `GRADS` in our 1,121 eligible schools---is among the lowest `MD_EARN_WNE_P10`.
+
+
+(9) How does `MD_EARN_WNE_P10` relate to the completion rate of first-time, full-time students within 100% of expected time to completion (`C100_4_POOLED`)? It seems reasonable to expect completion rates to be improved by increased instructional expenditures, so once again we'll color the scatterplot by instructional expenditures per full-time equivalent student. 
+
+```{r}
+ggplot(qual_colleges_all_data_clean, mapping = aes(x = C100_4_POOLED, 
+                                                   y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+geom_point(aes(color = INEXPFTE),  size = 0.85) +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  #for legend coloring and units in $$$
+  scale_color_viridis(option="A", label=scales::dollar) +  
+  guides(color=guide_legend(override.aes = list(size=3), nrow=2,
+                            (title="Instructional Expenditures\n per FTE"))) +
+  labs(title = "Median Earnings By Completion Rate (100% ETC)", 
+       subtitle = "Colored by Instructional Expenditures per FTE Student") +
+  xlab(label = "Completion Rate (100% ETC)") + 
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal() +
+  theme(legend.position = "top", legend.title = element_text(size=9,)) +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2")
+```
+
+Although not quite perfectly linear, there does appear to be a correlation between higher completion rates (within 100% of ETC) and higher `MD_EARN_WNE_P10`. Moreover, it is clear that the highest instructional expenditures per full-time equivalent student correspond with the highest completion rates and the highest `MD_EARN_WNE_P10`. 
+
+
+(10) How does `MD_EARN_WNE_P10` relate to instructional expenditures per full-time equivalent student (`INEXPFTE`)?
+
+```{r}
+ggplot(qual_colleges_all_data_clean, aes(x = INEXPFTE, y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2") +
+  labs(title = "Median Earnings by Instructional Expenditures per FTE") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Instructional Expenditures per FTE") +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal()
+```
+
+Here we observe a non-linear (exponential) relation between higher instructional expenditures per full-time equivalent student and higher `MD_EARN_WNE_P10`, although (up to a point) some correlation seems implied. This is somewhat surprising, as one may expect higher instructional expenditures consistently to correlate with increased `MD_EARN_WNE_P10`. Among our 1,121 eligible institutions, Washington University in Saint Louis, for example, has the highest (by far) instructional expenditures per FTE at $132,974. Yet they rank 32nd (of 1,121) in `MD_EARN_WNE_P10`. 
+
+
+(11) How does `MD_EARN_WNE_P10` relate to median debt for students who have completed (`GRAD_DEBT_MDN`)? Let's also color the scatterplot by average cost of attendance. Obviously an increased amount of debt upon graduation itself will not *cause* higher `MD_EARN_WNE_P10`, but let's see what we may learn:
+
+```{r}
+ggplot(qual_colleges_all_data_clean, aes(x = GRAD_DEBT_MDN, y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point(aes(color = COSTT4_A),  size = 0.85) +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  #for legend coloring and units in $$$
+  scale_color_viridis(option="A", label=scales::dollar) +  
+  guides(color=guide_legend(override.aes = list(size=3), 
+  #for legend size and title
+                            (title="Avg Cost of Attendance"))) +  
+  xlab(label = "Median Debt of Graduates") +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal() +
+  theme(legend.position = "top", legend.title = element_text(size=9,)) +
+  labs(title = "Median Earnings by Median Debt of Graduates", 
+       subtitle = "Colored by Avg Cost of Attendance") +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2")
+```
+
+Whereas one may expect higher median debt consistently to correlate to higher `MD_EARN_WNE_P10`, here we see the inverse: as median debt increases, `MD_EARN_WNE_P10` tends to *decrease*. Grambling State University, for instance, has the highest level of median debt for students who have completed at $36,750. Yet they rank 1,102 (out of 1,121) when it comes to `MD_EARN_WNE_P10`; only 19 schools have a *lower* `MD_EARN_WNE_P10` than the school with the *highest* median debt for students who have completed. 
+
+
+(12) Finally, how does `MD_EARN_WNE_P10` relate to average cost of attendance (`COSTT4_A`)? 
+
+```{r}
+ggplot(qual_colleges_all_data_clean, aes(x = COSTT4_A, y = MD_EARN_WNE_P10), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="chartreuse1", 
+              fill="darkolivegreen2") +
+  labs(title = "Median Earnings by Average Cost of Attendance") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Avg Cost of Attendance") +
+  ylab(label = "Median Earnings 10 years After Entry") +
+  theme_minimal()
+```
+
+While the relationship between `MD_EARN_WNE_P10` and average cost of attendance is not quite linear (somewhat polynomial), it does appear that an increase in the latter is associated with an increase in the former. 
+
+## Summary of Exploration of Median Earnings of Students Working and Not Enrolled 10 Years After Entry (`MD_EARN_WNE_P10`)
+
+Having explored median earnings of students working and not enrolled 10 years after entry, we now have a pretty good idea which variables have strong correlations with it. We can, however, confirm and sharpen our observations by creating and plotting a correlation matrix. Doing so will helpfully graph the correlations of the coefficients of our variables:
+
+```{r}
+cor_matrix = cor(qual_colleges_all_data_clean[ ,c(4,5,8,9,10,12,13,14,16,20,
+                                                  21,22,23,25)], 
+                 method='pearson',use='complete.obs')
+head(cor_matrix)
+ggcorrplot(cor_matrix, method = c("square"), type = c("full"), 
+           ggtheme = ggplot2::theme_minimal, 
+           title = "Correlation Matrix: Select Variables", show.legend = TRUE, 
+           legend.title = "Corr", 
+           show.diag = FALSE, outline.color = "gray", hc.order = TRUE, 
+           lab = TRUE, 
+           lab_col = "black", 
+           lab_size = 2, tl.cex = 10, tl.col = "black", tl.srt = 45, digits = 2) + 
+  theme(
+   legend.key.width = unit(.6, "cm"),   #to resize legend
+   legend.key.height = unit(1.4, "cm"),
+  )
+```
+
+Here positive correlations are represented in red, negative correlations in blue. Based on these observations, it appears that median earnings of students working and not enrolled 10 years after entry stands in 7 statistically significant (viz., >0.5) relations. This verifies our analytical observations of the data. Of particular note are `MD_EARN_WNE_P10's` positive correlations to out-of-state tuition and fees (`TUITIONFEE_OUT`), average SAT equivalent scores of students admitted (`SAT_AVG`), the retention rate of first-time, full-time students (`RET_FT4_POOLED`), and average monthly faculty salary (`AVGFACSAL`). Despite the intuition that higher instructional expenditures per full-time equivalent student (`INEXPFTE`) would signal higher `MD_EARN_WNE_P10`, the correlation is barely statistically significant (though it is positive). 
+
+
+# Exploring Net Present Value at the 40 Year Horizon (`X40.year.NPV`)
+
+Our second key dependent variable, `X40.year.NPV`, stems from the excellent work of Georgetown University's [Center on Education *and the* Workforce](https://cew.georgetown.edu/cew-reports/roi2022/). According to the CEW, `X40.year.NPV` is "the most comprehensive benchmark for judging [the] value" of these institutions. Refer to the "Glossary" appendix for further details. To incorporate `X40.year.NPV` into our analysis, I have added the `UNITID` column to CEW's dataset and used it as a key to join that dataset to our `qual_colleges_all_data`. The updated dataset is named `qual_colleges_ROI_merged_cleaned`. 
+
+Here is a glance at the new dataset:
+```{r message=FALSE, warning=FALSE}
+glimpse(qual_colleges_ROI_merged_cleaned)
+head(qual_colleges_ROI_merged_cleaned)
+```
+
+To confirm the number of observations in our updated dataset matches that of our dataset initially:
+```{r}
+dim(qual_colleges_ROI_merged_cleaned)
+```
+
+We're still working with the 1,121 colleges--good. 
+
+(1) Let's begin with asking, How is `X40.year.NPV` related to institutional admission rates (`ADM_RATE`)?
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, aes(x = ADM_RATE, y = `X40.year.NPV`), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1",
+              fill="mediumorchid1") +
+  labs(title = "40 Year Net Present Value By Admission Rates", 
+       element_text(family="Optima")) +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Admission Rates") +
+  ylab(label = "40 Year NPV") +
+  theme_minimal()
+```
+
+While this relation is not quite linear, the regression line does indicate that more selective admission rates point to greater `X40.year.NPV` Again, we also observe that *most* of the colleges in our dataset have admission rates above 50%.
+
+
+(2) How does `X40.year.NPV` relate to enrollment of undergraduate certificate/degree-seeking students (`UGDS`)?
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, aes(x = UGDS, y = X40.year.NPV), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=function(x) format(x, big.mark = ",", 
+                                               scientific = FALSE)) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1") +
+  labs(title = "40 Year Net Present Value By Undergrad Enrollment") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Undergrad Enrollment") +
+  ylab(label = "40 Year NPV") +
+  theme_minimal()
+```
+
+It seems clear that the number of undergraduate certificate/degree-seeking students at an institution has no significant bearing on `X40.year.NPV`.
+
+
+(3) How does `X40.year.NPV` relate to the average SAT equivalent score of students admitted (`SAT_AVG`)? Once again, because an institution's level of research activity, the presence and type of advanced programs, and mix of undergraduate degree types is tied to the presence of high-performing students, our scatterplot also indicates Carnegie Classification numbers by color.
+
+```{r message=FALSE, warning=FALSE}
+options(scipen=10000)
+p <- ggplot(qual_colleges_ROI_merged_cleaned, mapping = aes(x = SAT_AVG, 
+                                                            y = X40.year.NPV), 
+            alpha = 0.4, size = 0.5) +
+geom_point(aes(color = factor(CCBASIC.x)),  size = 0.85) +
+  scale_x_continuous(labels=function(x) format(x, big.mark = ",", 
+                                               scientific = FALSE)) +
+  scale_y_continuous(labels=scales::dollar_format())
+cols <- c("15" = "burlywood4", "16" = "red", "17" = "gray52", "18" = "blue",
+          "19" = "black", "20" = "chocolate1", "21" = "darkmagenta",
+          "22" = "deeppink","23" = "yellow2")
+p + scale_color_manual(values = cols) +
+  guides(color=guide_legend(override.aes = list(size=3.5), 
+                            (title="Carnegie Classifications"))) +
+  labs(title = "40 Year Net Present Value By Average SAT Scores", 
+       subtitle = "Colored by Carnegie Classification") +
+  xlab(label = "Average SAT Scores") + 
+  scale_colour_hue(h = c(0, 280)) +
+  ylab(label = "40 Year NPV") +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1")
+```
+
+Once again we are not surprised to observe that higher average SAT scores indicate higher `X40.year.NPV`. The relation is not quite perfectly linear, though. As with `MD_EARN_WNE_P10`, it does not appear that an institution's Carnegie Classification has much (if any) impact on its `X40.year.NPV`. We do observe, however, that (15) Doctoral Universities: Very High Research Activity and (22) Baccalaureate Colleges: Diverse Fields appear most frequently at the upper ranges of both `SAT_AVG` and `X40.year.NPV`.
+
+(4) How does `X40.year.NPV` relate to out-of-state tuition and fees (`TUITIONFEE_OUT`)?
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, aes(x = TUITIONFEE_OUT, 
+                                         y = X40.year.NPV), alpha = 0.4, size = 0.5) +
+  geom_point() +
+   scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1") +
+  labs(title = "40 Year Net Present Value By Out-of-State Tuition and Fees") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Out-of-State Tuition and Fees") +
+  ylab(label = "40 Year NPV") +
+  theme_minimal()
+```
+
+While the relation is not quite linear, it does appear that higher rates of out-of-state tuition and fees may weakly correlate to higher `X40.year.NPV`. The schools boasting the highest `X40.year.NPV` *do* demand the highest `TUITIONFEE_OUT`, but we also observe a cluster of schools whose `X40.year.NPV` is between $1.5M—$2M and who demand >$50,000 in `TUITIONFEE_OUT`.
+
+
+(5) How does `X40.year.NPV` relate to average monthly faculty salary (`AVGFACSAL`)?
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, aes(x = AVGFACSAL, y = X40.year.NPV), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1") +
+  labs(title = "40 Year Net Present Value By Average Monthly Faculty Salary") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Average Monthly Faculty Salary") + ylab(label = "40 Year NPV") +
+  theme_minimal()
+```
+
+It is reasonable to expect higher paying schools to attract superior faculty and thus to provide an education with greater return on investment, thereby realizing higher `X40.year.NPV`. That expectation is confirmed by a *nearly* perfectly linear positive correlation on our scatterplot (note how the points tend to *hug* the line). The majority of schools pay faculty $5,000—$10,000 per month.
+
+
+(6) How does `X40.year.NPV` relate to the proportion of faculty who are full-time (`PFTFAC`)? To enhance our understanding, the scatterplot displays average monthly faculty salary by color.
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, mapping = aes(x = PFTFAC, y = X40.year.NPV), 
+       alpha = 0.4, size = 0.5) +
+  geom_point(aes(color = AVGFACSAL),  size = 0.85) +
+  scale_color_viridis(option="B", label=scales::dollar) + #for legend coloring and units in $$$
+  scale_y_continuous(labels=scales::dollar_format()) +
+  guides(color=guide_legend(override.aes = list(size=3), 
+                            (title="Avg Monthly Faculty Salary"))) +  
+  #to adjust legend unit size & legend title
+  labs(title = "40 Year Net Present Value By Proportion of Full-time Faculty", 
+       subtitle = "Colored by Avg Monthly Faculty Salary") +
+  xlab(label = "Proportion of Full-time Faculty") + 
+  #scale_colour_hue(h = c(0, 280)) +
+  ylab(label = "40 Year NPV") +
+  theme_minimal() +
+   theme(legend.position = "top", legend.title = element_text(size=9,)) +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1")
+```
+
+As with average faculty salary, it is reasonable to expect a higher proportion of full-time faculty to correlate to higher `X40.year.NPV`. This seems to be supported by the observation that higher average monthly faculty salary appears to correlate to higher `X40.year.NPV`. The data, however, reveal a non-linear (somewhat polynomial) relation between the proportion of faculty who are full-time and `X40.year.NPV`. Interestingly, `X40.year.NPV` decreases as institutions reach 100% full-time faculty. Perhaps the salary costs for 100% full-time faculty entails higher cost of attendance, which tends to adversely affect `X40.year.NPV`?
+
+
+(7) How does `X40.year.NPV` relate to the retention rate of first-time, full-time students (`RET_FT4_POOLED`)? To enhance our understanding, the scatterplot displays instructional expenditures per full-time equivalent student by color. 
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, mapping = aes(x = RET_FT4_POOLED, 
+                                                       y = X40.year.NPV), 
+       alpha = 0.4, size = 0.5) +
+  geom_point(aes(color = INEXPFTE),  size = 0.85) +
+  #for legend coloring and units in $$$
+  scale_color_viridis(option="B", label=scales::dollar) + 
+  scale_y_continuous(labels=scales::dollar_format()) +
+  guides(color=guide_legend(override.aes = list(size=3), nrow=2,
+                            (title="Instructional Expenditures per FTE"))) +  
+  #to adjust legend unit size & legend title
+  labs(title = "40 Year NPV By Retention Rate of First-time, Full-time Students", 
+       subtitle = "Colored by Instructional Expenditures per FTE Student") +
+  xlab(label = "Retention Rate") + ylab(label = "40 Year NPV") +
+  theme_minimal() +
+  theme(legend.position = "top", legend.title = element_text(size=9,)) +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1")
+```
+
+We observe a strong indication that higher retention rates correlate to higher `X40.year.NPV` (note how the points tend to *hug* the line). We once again observe that the highest instructional expenditures per FTE student positively correspond with the highest student retention rates. The majority of schools have a `RET_FT4_POOLED` rate between 60%—87%, while schools boasting `RET_FT4_POOLED`  greater than 90% rate enjoy considerably higher `X40.year.NPV`.  
+
+
+(8) How does `X40.year.NPV` relate to the number of graduate students (`GRADS`)?
+
+```{r message=FALSE, warning=FALSE}
+ggplot(qual_colleges_ROI_merged_cleaned, aes(x = GRADS, y = X40.year.NPV), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+   scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=function(x) format(x, big.mark = ",", 
+                                               scientific = FALSE)) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1") +
+  labs(title = "40 Year Net Present Value By Graduate Enrollment") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Graduate Enrollment") +
+  ylab(label = "40 Year NPV") +
+  theme_minimal()
+```
+
+There is a non-linear (exponential) relation between `X40.year.NPV` and the number of graduate students at a school, and the latter appears to have no bearing on the former. As with `MD_EARN_WNE_P10`, Liberty University has an incredible number of graduate students but nevertheless claims one of the lowest 40 year net present values. 
+
+
+(9) How does `X40.year.NPV` relate to the completion rate of first-time, full-time students within 100% of expected time to completion (`C100_4_POOLED`)? It seems reasonable to expect completion rates to be improved by increased instructional expenditures, so once again we'll color the scatterplot by instructional expenditures per full-time equivalent student.
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, mapping = aes(x = C100_4_POOLED, 
+                                                       y = X40.year.NPV), 
+       alpha = 0.4, size = 0.5) +
+geom_point(aes(color = INEXPFTE), size = 0.85) +
+  scale_y_continuous(labels=scales::dollar_format()) +
+#for legend coloring and units in $$$
+  scale_color_viridis(option="B", label=scales::dollar) + 
+  guides(color=guide_legend(override.aes = list(size=3), nrow=2,
+                             (colour = "Instructional Expenditures\n per FTE")))+
+  labs(title = "40 Year Net Present Value By Completion Rate (100% ETC)",
+       subtitle = "Colored by Instructional Expenditures per FTE Student") +
+  xlab(label = "Completion Rate (100% ETC)") + ylab(label = "40 Year NPV") +
+  theme_minimal() +
+  theme(legend.position = "top", legend.title = element_text(size=9,)) +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1")
+```
+
+Although not quite perfectly linear, there does appear to be a positive correlation between higher completion rates (within 100% of ETC) and higher `X40.year.NPV`. Moreover, it is clear that the highest instructional expenditures per full-time equivalent student correspond with the highest completion rates and the highest `X40.year.NPV`. Most institutions in our dataset spend roughly $25,000 in instructional expenditures per FTE student.
+
+
+(10) How does `X40.year.NPV` relate to instructional expenditures per full-time equivalent student (`INEXPFTE`)?
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, aes(x = INEXPFTE, y = X40.year.NPV), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1") +
+  labs(title = "40 Year Net Present Value By Instructional Expenditures per FTE") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Instructional Expenditures per FTE") +
+  ylab(label = "40 Year NPV") +
+  theme_minimal()
+```
+
+Here we observe some correlation (up to a point) between higher instructional expenditures per full-time equivalent student and higher `X40.year.NPV`. This is surprising, as one may expect higher instructional expenditures consistently to result in increased `X40.year.NPV`. Among our 1,121 eligible institutions, Washington University in Saint Louis, for example, has the highest (by far) instructional expenditures per FTE at $132,974. Yet they rank 40th (of our 1,121) in `X40.year.NPV`.  
+
+
+(11) How does `X40.year.NPV` relate to median debt for students who have completed (`GRAD_DEBT_MDN`)? Let's also color the scatterplot by average cost of attendance. Obviously an increased amount of debt upon graduation itself will not *cause* higher `X40.year.NPV`, but let's see what we may learn:
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, aes(x = GRAD_DEBT_MDN, y = X40.year.NPV), 
+       alpha = 0.4, size = 0.5) +
+  geom_point(aes(color = COSTT4_A),  size = 0.85) +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+#for legend coloring and units in $$$
+  scale_color_viridis(option="B", label=scales::dollar) +  
+  guides(color=guide_legend(override.aes = list(size=3), 
+#for legend size and title 
+                            (title="Avg Cost of Attendance"))) + 
+  xlab(label = "Median Debt of Graduates") +
+  ylab(label = "40 Year NPV") +
+  theme_minimal() +
+  theme(legend.position = "top", legend.title = element_text(size=9,)) +
+  labs(title = "40 Year Net Present Value By Median Debt of Graduates", 
+       subtitle = "Colored by Avg Cost of Attendance") +
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1")
+```
+
+Whereas one may expect higher median debt consistently to correlate to higher `X40.year.NPV` (it is widely assumed, in the popular mindset, that more expensive colleges are superior), here we see the inverse: as median debt increases, `X40.year.NPV` actually tends to *decrease*. To be clear: greater `GRAD_DEBT_MDN` does not equal greater cost of attendance; it may be that attendees of colleges with a certain cost of attendance do not need to assume student debt to pay for attendance. It is nevertheless worth noting that Grambling State University, for instance, has the highest level of median debt for students who have completed at $36,750. Yet they rank 1,102 (out of 1,121) when it comes to `X40.year.NPV`; only 14 schools have a *lower* `X40.year.NPV` than the school with the *highest* median debt for students who have completed. At the same time, California Institute of Technology and Massachusetts Institute of Technology, who are tied for the highest `X40.year.NPV` of our 1,121 (at $2,490,000), rank among the 100 institutions with the *lowest* `GRAD_DEBT_MDN`. 
+
+
+(12) Finally, how does `X40.year.NPV` relate to average cost of attendance (`COSTT4_A`)?
+
+```{r}
+ggplot(qual_colleges_ROI_merged_cleaned, aes(x = COSTT4_A, y = X40.year.NPV), 
+       alpha = 0.4, size = 0.5) +
+  geom_point() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  scale_x_continuous(labels=scales::dollar_format()) +
+  guides(color = guide_legend(override.aes = list(size = 5))) + 
+  geom_smooth(method="loess", se=TRUE, formula = y~x, color="darkorchid1", 
+              fill="mediumorchid1") +
+  labs(title = "40 Year Net Present Value By Average Cost of Attendance") +
+  scale_colour_hue(h = c(0, 280)) +
+  xlab(label = "Avg Cost of Attendance") +
+  ylab(label = "40 Year NPV") +
+  theme_minimal()
+```
+
+While the relationship between `X40.year.NPV` and average cost of attendance is not quite linear (somewhat polynomial), it does appear that an increase in the latter indicates an increase in the former. We observe that the schools with the highest cost of attendance have the highest `X40.year.NPV`. It is also worth observing that institutions with the highest `COSTT4_A` are *much* more expensive than the national average. According to the [National Center for Educational Statistics](https://nces.ed.gov/fastfacts/display.asp?id=76), the undergraduate average 2019-2020 tuition and fees at public colleges was $9,400; at private nonprofit colleges it was $36,700; and at private for-profit colleges it was $19,100. 
+
+## Summary of Exploration of Net Present Value at the 40 Year Horizon (`X40.year.NPV`)
+
+As before, it will prove helpful to create and plot a correlation matrix to graph the correlations of the coefficients of our dependent variable `X40.year.NPV` and the independent variables:
+
+```{r}
+cor_matrix2 = cor(qual_colleges_ROI_merged_cleaned[ ,c(7,42,11,10,14,15,
+                                                       16,23,25,22,24,27,12)], 
+                 method='pearson',use='complete.obs')
+head(cor_matrix2)
+ggcorrplot(cor_matrix2, method = c("square"), type = c("full"), 
+           ggtheme = ggplot2::theme_minimal, 
+           title = "Correlation Matrix: Select Variables", show.legend = TRUE, 
+           legend.title = "Corr", show.diag = FALSE, outline.color = "gray", 
+           hc.order = TRUE, lab = TRUE, lab_col = "black", 
+           lab_size = 2, tl.cex = 10, tl.col = "black", tl.srt = 45, digits = 2) + 
+  theme(
+   legend.key.width = unit(.6, "cm"),   #to resize legend
+   legend.key.height = unit(1.4, "cm"),
+  )
+```
+
+Here positive correlations are represented in red, negative correlations in blue. Based on these observations, it appears that net present value at the 40 year horizon stands in 6 statistically significant (viz., >0.5) relations. This verifies our analytical observations of the data. Of particular note are `X40.year.NPV's` positive correlations to average monthly faculty salary (`AVGFACSAL`), average SAT equivalent scores of students admitted (`SAT_AVG`), and the retention rate of first-time, full-time students (`RET_FT4_POOLED`). While one may expect completion rate (`C100_4_POOLED`) to signal higher `X40.year.NPV`, it was barely statistically significant (0.58). 
+
+Our exploration of net present value at the 40 year horizon for our 1,121 colleges, as well as of `MD_EARN_WNE_P10`, has put us in a good position to engage in predictive analysis to determine what (if any) combination of institutional features predict achievement of "top college" status.
+
+
+# Regression Analysis of `MD_EARN_WNE_P10` and `X40.year.NPV`
+
+First, to keep things tidy, we'll eliminate from our dataset several irrelevant and non-numeric attributes and rename our updated dataset `final_data`. We'll also use Cook's distance to check for any outliers in our data. 
+
+```{r, echo=FALSE, message = FALSE, warning=FALSE}
+#remove irrelevant columns
+qual_colleges_ROI_merged_cleaned_initialtrim <- 
+  qual_colleges_ROI_merged_cleaned[-c(29,31:37,39:41,43:53,55:72)]
+ #remove character columns should've removed in first step
+ qual_colleges_ROI_merged_cleaned_trimmed <-
+   qual_colleges_ROI_merged_cleaned_initialtrim[-c(3,4,28:29)] 
+ #reduce data (`qual_colleges_ROI_merged_cleaned_trimmed') to only columns using
+ final_data <- qual_colleges_ROI_merged_cleaned_trimmed[ , c('MD_EARN_WNE_P10', 
+'ADM_RATE', 'UGDS', 'SAT_AVG', 'TUITIONFEE_OUT', 'AVGFACSAL', 'PFTFAC', 
+'RET_FT4_POOLED', 'INEXPFTE', 'C100_4_POOLED', 'GRAD_DEBT_MDN', 'COSTT4_A', 
+'X40.year.NPV')]
+ summary(final_data)
+ 
+ #detect outliers by applying Cook's distance
+ mod1 <- lm(MD_EARN_WNE_P10 ~ ., data=final_data)
+cooksd1 <- cooks.distance(mod1)
+# plot cook's distance
+plot(cooksd1, pch="*", cex=2, main="Influential Obs by Cooks distance")  
+abline(h = 4*mean(cooksd1, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd1)+1, y=cooksd1, labels=ifelse(cooksd1>4*mean(cooksd1, 
+ na.rm=T),names(cooksd1),""), col="red")  # add labels
+```
+
+In general use, those observations that have a cook’s distance greater than 4 times the mean may be classified as influential. Our data does include several influential outliers, but we'll need a closer look to determine whether these are problematic or legitimate observations. Let's isolate the most influential outliers from our data so they can be examined row-by-row:
+
+```{r}
+# influential row numbers
+influential <- as.numeric(names(cooksd1)[(cooksd1 > 4*mean(cooksd1, na.rm=T))])  
+head(final_data[influential, ])  # influential observations
+```
+While each of these observations does include at least one unusual value, each nevertheless appears to be a legitimate observation. 
+
+Now, so that we may later evaluate the performance of our results, we split our data into a `training set` (80% of total data, to be used for fitting our regression models) and a `test set` (20% of total data, to be used for evaluating the trained models). 
+
+```{r}
+set.seed(1234)
+split_final_data <- 
+  sample(c(rep(0,round(0.8 * nrow(final_data))),
+           rep(1, round(0.2 * nrow(final_data)))))
+table(split_final_data)
+```
+
+To have a quick look at our training set:
+```{r, echo=FALSE, message = FALSE, warning=FALSE}
+training_set <- final_data[split_final_data == 0, ]
+head(training_set)
+```
+To have a quick look at our testing set:
+```{r, echo=FALSE, message = FALSE, warning=FALSE}
+testing_set <- final_data[split_final_data == 1, ]
+head(testing_set)
+```
+
+Now, because we regard our predictor variables as equally important, we need to normalize our data to prevent any one variable from wielding an outsized influence on our results. To do this we will normalize our variables to the same 0—1 scale using min-max normalization, which re-scales the values by subtracting the minimum value the relevant column from each value and then dividing the result by the difference between the maximum and minimum values of that column:
+
+```{r, message = FALSE, warning=FALSE}
+#define Min-Max normalization function
+min_max_norm <- function(x){
+  (x - min(x)) / (max(x) - min(x))
+  }
+
+#apply Min-Max normalization to dataset
+training_set_NORM <- as.data.frame(lapply(training_set, min_max_norm))
+head(training_set_NORM)
+```
+
+Using our normalized training dataset, we're ready now to construct a multivariate regression model that fits our data well, beginning with a model that includes all of our independent variables:
+
+```{r}
+lm_joined1 <- lm(cbind(MD_EARN_WNE_P10, X40.year.NPV) ~ ADM_RATE + UGDS + SAT_AVG + 
+                   TUITIONFEE_OUT + AVGFACSAL + PFTFAC + RET_FT4_POOLED + 
+                   INEXPFTE + COSTT4_A + GRAD_DEBT_MDN + C100_4_POOLED, 
+                 data = training_set_NORM)
+summary(lm_joined1)
+```
+
+We observe that our first model's (`lm_joined1`) residual standard error for response `MD_EARN_WNE_P10` is 0.07899 and for response `X40.year.NPV` is 0.07977, both of which are pleasingly low. The smaller the residual standard error, the better a regression model fits a dataset. We observe that the adjusted R^2^ value for response `MD_EARN_WNE_P10` is 0.7319 and for response `X40.year.NPV` is 0.6986. The former means that 73% of the variation in an institution's `MD_EARN_WNE_P10` can be explained by the independent variables of our first model, while 70% of the variation in an institution's `X40.year.NPV` can be explained by the same. Let's also look at how the model performs in terms of the RMSE (Root Mean Standard Error) test, which tells us the average distance between the predicted values from the model and the actual values in the dataset:
+
+```{r}
+#to create the needed RMSE function
+rmse = function(actual, predicted) {
+  sqrt(mean((actual - predicted) ^ 2))
+}
+get_rmse = function(model, data, response) {
+  rmse(actual = data[, response], 
+       predicted = predict(model, data))
+}
+# to get training set RMSE for `lm_joined1`
+get_rmse(model = lm_joined1, data = training_set_NORM, 
+         response = "MD_EARN_WNE_P10") 
+get_rmse(model = lm_joined1, data = training_set_NORM, 
+         response = "X40.year.NPV") 
+```
+
+An RMSE of 0.08 is quite low, indicating this model is a good fit to our data.
+
+Now to check reliability of our model, let's visualize with a residuals vs. fitted plot. This will help us detect non-linearity as well as unequal error variances:
+```{r}
+res_joined1 <- resid(lm_joined1)
+plot(fitted(lm_joined1), res_joined1)
+abline(0,0)
+```
+
+Simply put: we do *not* want to see any patterns in our residuals versus fitted plot (because they should be random), and we are pleased to find here a normal distribution.Finally, let's also check the reliability of our model with a Q-Q plot:
+
+```{r}
+#create Q-Q plot for residuals
+qqnorm(res_joined1, col = "red")
+
+#add a straight diagonal line to the plot
+qqline(res_joined1)
+```
+
+We observe on the Q—Q plot that our residuals tend to stray slightly from the ends of our line, which could indicate they're not normally distributed. Nevertheless, since our summary discloses residuals closely centered around zero with comparable spread on either side, we are comfortable that our model fits the assumption of heteroscedasticity.
+
+Our model is good, but let's see if a more parsimonious model would be an improvement---at least by virtue of employing fewer predictor variables. To check, let's perform stepwise model selection using backward elimination. The idea is to remove variables one at a time till we arrive at the optimal model (in terms of having the lowest AIC value). 
+
+```{r}
+# start at the full model
+# allow removal but not addition of predictors
+mStep(lm_joined1, direction=c("backward"),trace=TRUE, keep=TRUE, steps=1000)   
+```
+
+According to our stepwise model selection procedure, our first model's predictive variables provide the optimal fit to our data, with an AIC of -6637.03. Although several independent variables have p-values of >0.05, testing of a model fitted without those variables was in fact inferior to `lm_joined1` in terms of AIC, Adjusted R^2^, RMSE, and ANOVA tests.
+
+Before finally accepting `lm_joined1`, though, let's see if it can be improved upon. We'll check the performance of other models, beginning with 3 models that implement polynomial functions. We'll next check to see whether the interaction of (rather than the *combination of*) certain predictors can better explain our data. Finally, for our sixth and final model, we'll check the performance of an interactive model that implements polynomials. 
+
+```{r}
+#w/lm_joined1 poly deg 1
+lm_joined1_POLY1 <- lm(formula = cbind(training_set_NORM$MD_EARN_WNE_P10, 
+   training_set_NORM$X40.year.NPV) ~ poly(training_set_NORM$ADM_RATE, degree=1, 
+   raw=TRUE) + poly(training_set_NORM$UGDS, degree=1, raw=TRUE) + 
+   poly(training_set_NORM$SAT_AVG, degree=1, raw=TRUE) + 
+   poly(training_set_NORM$TUITIONFEE_OUT, degree=1, raw=TRUE) + 
+   poly(training_set_NORM$AVGFACSAL, degree=1, raw=TRUE) + 
+   poly(training_set_NORM$PFTFAC, degree=1, raw=TRUE) + 
+   poly(training_set_NORM$RET_FT4_POOLED, degree=1, raw=TRUE) + 
+   poly(training_set_NORM$INEXPFTE, degree=1, raw=TRUE) + 
+   poly(training_set_NORM$COSTT4_A, degree=1, raw=TRUE) + 
+   poly(training_set_NORM$C100_4_POOLED, degree=1, raw=TRUE) + 
+   poly(training_set_NORM$GRAD_DEBT_MDN, degree=1, raw=TRUE)) 
+summary(lm_joined1_POLY1)
+```
+
+```{r}
+#w/lm_joined1 poly deg 2
+lm_joined1_POLY2 <- lm(formula = cbind(training_set_NORM$MD_EARN_WNE_P10, 
+  training_set_NORM$X40.year.NPV) ~ poly(training_set_NORM$ADM_RATE, degree=2, 
+  raw=TRUE) + poly(training_set_NORM$UGDS, degree=2, raw=TRUE) + 
+  poly(training_set_NORM$SAT_AVG, degree=2, raw=TRUE) + 
+  poly(training_set_NORM$TUITIONFEE_OUT, degree=2, raw=TRUE) + 
+  poly(training_set_NORM$AVGFACSAL, degree=2, raw=TRUE) + 
+  poly(training_set_NORM$PFTFAC, degree=2, raw=TRUE) + 
+  poly(training_set_NORM$RET_FT4_POOLED, degree=2, raw=TRUE) + 
+  poly(training_set_NORM$INEXPFTE, degree=2, raw=TRUE) + 
+  poly(training_set_NORM$COSTT4_A, degree=2, raw=TRUE) + 
+  poly(training_set_NORM$C100_4_POOLED, degree=2, raw=TRUE) + 
+  poly(training_set_NORM$GRAD_DEBT_MDN, degree=2, raw=TRUE))  
+summary(lm_joined1_POLY2)
+```
+
+```{r}
+#w/lm_joined1 poly deg 3
+lm_joined1_POLY3 <- lm(formula = cbind(training_set_NORM$MD_EARN_WNE_P10, 
+  training_set_NORM$X40.year.NPV) ~ poly(training_set_NORM$ADM_RATE, degree=3, 
+  raw=TRUE) + poly(training_set_NORM$UGDS, degree=3, raw=TRUE) + 
+  poly(training_set_NORM$SAT_AVG, degree=3, raw=TRUE) + 
+  poly(training_set_NORM$TUITIONFEE_OUT, degree=3, raw=TRUE) + 
+  poly(training_set_NORM$AVGFACSAL, degree=3, raw=TRUE) + 
+  poly(training_set_NORM$PFTFAC, degree=3, raw=TRUE) + 
+  poly(training_set_NORM$RET_FT4_POOLED, degree=3, raw=TRUE) + 
+  poly(training_set_NORM$INEXPFTE, degree=3, raw=TRUE) + 
+  poly(training_set_NORM$COSTT4_A, degree=3, raw=TRUE) + 
+  poly(training_set_NORM$C100_4_POOLED, degree=3, raw=TRUE) + 
+  poly(training_set_NORM$GRAD_DEBT_MDN, degree=3, raw=TRUE))  
+summary(lm_joined1_POLY3)
+```
+
+```{r}
+lm_comb1 <- lm(cbind(MD_EARN_WNE_P10, X40.year.NPV) ~ SAT_AVG*TUITIONFEE_OUT*
+  AVGFACSAL* RET_FT4_POOLED*INEXPFTE*C100_4_POOLED, data = training_set_NORM)
+summary(lm_comb1)
+
+lm_comb1_POLY2 <- lm(cbind(MD_EARN_WNE_P10, X40.year.NPV) ~ 
+  poly(SAT_AVG*TUITIONFEE_OUT*AVGFACSAL* RET_FT4_POOLED*INEXPFTE*C100_4_POOLED,
+       2,raw=TRUE), data = training_set_NORM)
+summary(lm_comb1_POLY2)
+```
+
+
+# Model Selection: Choosing from among the Six
+First, Let's take a look at how our 6 models perform in terms of their residual errors. To do this we'll use the RMSE (Root Mean Standard Error) test. This test helps us measure how well a model "fits" our data by determining the average distance between the model's predicted and the actual values in our data. The lower the RMSE score, the better a model fits the data.
+
+
+```{r}
+model_list <- list(lm_joined1, lm_joined1_POLY1, lm_joined1_POLY2, 
+                   lm_joined1_POLY3, lm_comb1, lm_comb1_POLY2)
+```
+
+```{r include=FALSE}
+#apply Min-Max normalization to dataset
+test_set_NORM <- as.data.frame(lapply(testing_set, min_max_norm))
+head(test_set_NORM)
+```
+
+```{r}
+#to create needed function
+get_complexity = function(model) {
+  length(coef(model)) - 1
+}
+```
+
+To ascertain each model's RMSE for each dependent variable on both the training and test datasets:
+```{r warning=FALSE}
+train_rmse = sapply(model_list, get_rmse, data = training_set_NORM, 
+                    response = "MD_EARN_WNE_P10")
+test_rmse = sapply(model_list, get_rmse, data = test_set_NORM, 
+                   response = "MD_EARN_WNE_P10")
+model_complexity = sapply(model_list, get_complexity)
+
+train_rmse2 = sapply(model_list, get_rmse, data = training_set_NORM, 
+                     response = "X40.year.NPV")
+test_rmse2 = sapply(model_list, get_rmse, data = test_set_NORM, 
+                    response = "X40.year.NPV")
+model_complexity2 = sapply(model_list, get_complexity)
+```
+
+We then plot the results. The train RMSE can be seen in blue, while the test RMSE is given in orange.
+```{r message=FALSE, warning=FALSE}
+plot(model_complexity, train_rmse, type = "b", 
+     ylim = c(min(c(train_rmse, test_rmse)) - 0.02, 
+              max(c(train_rmse, test_rmse)) + 0.02), 
+     col = "dodgerblue", 
+     xlab = "Model Size",
+     ylab = "RMSE")
+     title(main = "For `MD_EARN_WNE_P10`")
+lines(model_complexity, test_rmse, type = "b", col = "darkorange")
+
+plot(model_complexity2, train_rmse2, type = "b", 
+     ylim = c(min(c(train_rmse2, test_rmse2)) - 0.02, 
+              max(c(train_rmse2, test_rmse2)) + 0.02), 
+     col = "dodgerblue", 
+     xlab = "Model Size",
+     ylab = "RMSE")
+     title(main = "For `X40.year.NPV`")
+lines(model_complexity2, test_rmse2, type = "b", col = "darkorange")
+```
+
+We can summarize the results as a table:
+
+```{r}
+Model <- c('lm_joined1', 'POLY1', 'POLY2', 'POLY3', 'comb1', 'comb1_POLY2')
+Train_RMSE_EARN <- c(0.08067379, 0.08067379, 0.07840872, 0.07697141, 0.07271933, 
+                     0.1171275)
+Test_RMSE_EARN <- c(0.1728833, 0.2469603, 0.2481993, 0.2484814, 0.198948, 
+                    0.2379814)
+Train_RMSE_NPV <- c(0.08142455, 0.08142455, 0.07896644, 0.07745114, 0.07312866, 
+                    0.1118931)
+Test_RMSE_NPV <- c(0.1603544, 0.2354511, 0.2368802, 0.237231, 0.1888297, 
+                   0.2303726)
+Predictors <- c(23,23,45,67,127,5)
+RMSE_results_all_models <- data.frame(Model, Train_RMSE_EARN, Test_RMSE_EARN, 
+                                      Train_RMSE_NPV, Test_RMSE_NPV, Predictors)
+print(RMSE_results_all_models)
+```
+
+Models `lm_comb1_POLY2` is the least flexible, and model `lm_comb1` is the most flexible. We see RMSE on `training_set_NORM` decreases as flexibility increases for both dependent variables. We see that the RMSE on `test_set_NORM` is smallest for `lm_joined1` for both dependent variables. In terms of the RMSE test, it appears `lm_joined1` will perform the best on future data not used to train the model. It is worth noting that the performance of `lm_comb1` is not far behind that of `lm_joined1`. 
+
+Let's now consider other features of `lm_joined1`, `lm_comb1`, `lm_comb1_POLY2` before making a final decision:
+
+```{r}
+Model <- c('lm_joined1', 'comb1', 'comb1_POLY2') 
+Adj.R2.EARN <- c(0.7319, 0.7714, 0.4186)
+Adj.R2.NPV <- c(0.6986, 0.7449, 0.416)
+ReStdErr.EARN <- c(0.07899, 0.07295, 0.1163)
+ReStdErr.NPV <- c(0.07977, 0.07339, 0.111)
+AIC <- c(-6637.03, -6599.35, -5557.1)
+Factors_all_models <- data.frame(Model, Adj.R2.EARN, Adj.R2.NPV, 
+                                 ReStdErr.EARN, ReStdErr.NPV, AIC)
+print(Factors_all_models)
+```
+
+We see that `lm_comb1` has R^2^ values *just* higher than those of `lm_joined1`, as well as the lowest Residual Standard Error values. Simply put, Adjusted R^2^ tells us something of how well a model explains the *observed* data. The Akaike information criterion (AIC) is a metric for comparing the fit of regression models. Roughly, AIC tells us something of how well a model will predict new data. A lower AIC indicates better prediction. We observe that `lm_joined1` has the lowest AIC score. 
+
+Both `lm_joined1` and `lm_comb1` offer strong performance, but given its superiority on AIC and RMSE `lm_joined1` is preferable. Still, let's run one final test. By performing a MANOVA test on both `lm_joined1` and `lm_comb1`, we'll be able to compare Pillai’s trace on each. The closer Pillai’s trace is to 1, the stronger the evidence that the explanatory variable has a statistically significant effect on the values of the response variables.
+
+```{r}
+dep_vars <- cbind(training_set_NORM$MD_EARN_WNE_P10, training_set_NORM$X40.year.NPV)
+ind_vars <- training_set_NORM$ADM_RATE + training_set_NORM$UGDS + 
+  training_set_NORM$SAT_AVG + training_set_NORM$TUITIONFEE_OUT + 
+  training_set_NORM$AVGFACSAL + training_set_NORM$PFTFAC + 
+  training_set_NORM$RET_FT4_POOLED + training_set_NORM$INEXPFTE + 
+  training_set_NORM$COSTT4_A + training_set_NORM$GRAD_DEBT_MDN + 
+  training_set_NORM$C100_4_POOLED
+manova_lm_joined1 <- manova(dep_vars ~ ind_vars, training_set_NORM)
+summary(manova_lm_joined1)
+```
+
+```{r}
+dep_vars2 <- cbind(training_set_NORM$MD_EARN_WNE_P10, training_set_NORM$X40.year.NPV)
+ind_vars2 <- training_set_NORM$SAT_AVG * training_set_NORM$TUITIONFEE_OUT * 
+  training_set_NORM$AVGFACSAL * training_set_NORM$RET_FT4_POOLED * 
+  training_set_NORM$C100_4_POOLED * training_set_NORM$INEXPFTE
+manova_lm_comb1 <- manova(dep_vars2 ~ ind_vars2, training_set_NORM)
+summary(manova_lm_comb1)
+```
+
+We observe that `lm_joined1` has a Pillai value of 0.58613, whereas `lm_comb1` has a Pillai score of only 0.30499.
+
+To have a quick look at variance-covariance on `lm_joined1`:
+```{r include=FALSE}
+lm_joined1_on.test <- lm(cbind(MD_EARN_WNE_P10, X40.year.NPV) ~ ADM_RATE + UGDS + 
+  SAT_AVG + TUITIONFEE_OUT + AVGFACSAL + PFTFAC + RET_FT4_POOLED + INEXPFTE + 
+  COSTT4_A + GRAD_DEBT_MDN + C100_4_POOLED, data = test_set_NORM)
+```
+
+```{r}
+#to check variance-covariance
+TESTER3 <- vcov(lm_joined1_on.test)
+TO_VIZ <- cov2cor(TESTER3)
+ggcorrplot(TO_VIZ, method = c("square"), type = c("full"), 
+           ggtheme = ggplot2::theme_minimal, 
+           title = "Variance-Covariace Matrix", show.legend = TRUE, 
+           legend.title = "Corr", show.diag = FALSE, outline.color = "gray", 
+           hc.order = TRUE, lab = TRUE, lab_col = "black", 
+           lab_size = 1, tl.cex = 5, tl.col = "black", tl.srt = 90, digits = 2) + 
+  theme(
+    legend.key.width = unit(1.1, "cm"),   #to resize legend
+    legend.key.height = unit(.4, "cm"),
+    legend.position = "top",
+    text = element_text(size = 6))
+```
+
+```{r}
+P <- manova_summary <- manova(lm_joined1_on.test)
+summary(P)
+Anova(lm_joined1_on.test)
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+summary(lm_joined1_on.test)
+```
+
+We are pleased to observe that on the test data, `lm_joined1` has a residual standard error for response `MD_EARN_WNE_P10` of 0.1003 and for response `X40.year.NPV` of 0.1086, both of which are pleasingly low. We also observe that the adjusted R^2^ value for response `MD_EARN_WNE_P10` is 0.732 and for response `X40.year.NPV` is 0.6695 The former means that 73% of the variation in an institution’s `MD_EARN_WNE_P10` can be explained by the independent variables of our model, while 67% of the variation in an institution’s `X40.year.NPV` can be explained by the same.
+
+To visualize `lm_joined` on the test dataset:
+```{r}
+visreg(lm_joined1_on.test)
+```
+
+# Conclusion
+
+This portion of our study undertook to answer the question, Which institutional features predict achievement of “top college” status? Focusing on the 1,121 eligible institutions, our statistical analysis of the relationships between the dependent variables---`MD_EARN_WNE_P10` and `X40.year.NPV`---and twelve independent variables. We stipulated that the likelihood of producing graduates with higher future earnings equates to an institution’s being  “top college”. 
+
+According to our analysis, the 3 most statistically significant predictors are `TUITIONFEE_OUT`, `AVGFACSAL`, and `RET_FT4_POOLED`. We are not surprised to find these traits closely associated with America's top colleges: the best schools will tend to demand higher out-of-state tuition, will tend to pay their faculty well, and will tend to maintain a higher rate of student retention. Those seeking colleges that offer the highest `MD_EARN_WNE_P10` and `X40.year.NPV` will do well to seek institutions offering high `AVGFACSAL`, boasting high `RET_FT4_POOLED`, and should expect them to demand high `TUITIONFEE_OUT`. Additionally, they should seek colleges with low `ADM_RATE`, lower `UGDS`, and high `SAT_AVG`, `PFTFAC`, `INEXPFTE`, and `C100_4_POOLED`. They should not be surprised to find these schools have the highest `COSTT4_A` and `GRAD_DEBT_MDN`, as well.
